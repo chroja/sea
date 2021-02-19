@@ -12,6 +12,8 @@ bool SET_RTC = false;
 bool USE_GAMMA_RGB = true;
 bool TEST_RGB = true;
 
+byte testPWM = 5;
+
 #define DEBUG
 
 
@@ -39,7 +41,7 @@ int gamma[] = {
 };
 
 long LightCurve[][4] = {
-    // {target time, target red, target green, target blue, target white} - first time must bee 0, last time must bee 86 399 (sec), color 0,0%-100,0% (0-1000)
+    // {target time, target red, target green, target blue} - first time must bee 0, last time must bee 86 399 (sec), color 0,0%-100,0% (0-1000)
     {0, 0, 0, 0},           //00:00
     {57600, 0, 0, 0},       //16:00
     {57900, 700, 0, 700},   //16:05
@@ -47,6 +49,27 @@ long LightCurve[][4] = {
     {75900, 0, 0, 0},       //21:05 
     {86399, 0, 0, 0}     //23:59:59
 };
+
+
+int NumRows;
+int IndexRow;
+int CurrentRow;
+int TargetRow;
+
+int RedCurr = 0;       //0-100
+int RedPrev = 0;       //0-100
+int RedPwm = 0;        //0-255
+int RedPwmMax = 255;   //0-255
+
+int GreenCurr = 0;
+int GreenPrev = 0;
+int GreenPwm = 0;
+int GreenPwmMax = 255;
+
+int BlueCurr = 0;
+int BluePrev = 0;
+int BluePwm = 0;
+int BluePwmMax = 255;
 
 
 
@@ -109,11 +132,112 @@ void loop (){
         GetTime();
         RtcCurrentMillis = millis();
     }
-    SerialInfo();
+    PrepareShowLight();
 
+    SerialInfo();
 }
 
 //****************************************** FUNCTION ****************************************
+
+
+void GetTime(){
+    DateTime = rtc.getDateTime();
+    int NTimeY = DateTime.year;
+    byte NTimeMo = DateTime.month;
+    byte NTimeDay = DateTime.day;
+    byte NTimeH = DateTime.hour;
+    byte NTimeM = DateTime.minute;
+    byte NTimeS = DateTime.second;
+    if (((NTimeMo > 0) && (NTimeMo < 13)) && ((NTimeH >= 0) && (NTimeH < 24)) && ((NTimeM >= 0) && (NTimeM < 60))){
+        TimeY = NTimeY;
+        TimeMo = NTimeMo;
+        TimeDay = NTimeDay;
+        TimeH = NTimeH;
+        TimeM = NTimeM;
+        TimeS = NTimeS;
+        TimeStamp = (long(TimeH) * 3600) + (long(TimeM) * 60) + long(TimeS);
+        #ifdef DEBUG
+            Serial.println("Correct time read");
+        #endif
+    }
+    else{
+        #ifdef DEBUG
+            Serial.println("err time read");
+        #endif
+    }
+}
+
+
+void SerialInfo(){
+    #ifdef DEBUG
+        if (DEBUG_TimeStamp != TimeStamp){
+            Serial.println();
+            Serial.println("------------------------------------------------------------");
+            Serial.println("-------------------Start serial info------------------------");
+            Serial.print("Actual date and time " + String(TimeDay) + '/' + String(TimeMo) + '/' + String(TimeY) + ' ' + String(TimeH) + ":" + String(TimeM) + ":" + String(TimeS));
+            Serial.print("\nTime Stamp (sec): " + String(TimeStamp));
+            Serial.print("\nindex current row: ");    Serial.print(CurrentRow);     Serial.print("\tindex target row: ");    Serial.print(TargetRow);
+            Serial.print("\nRed: ");        Serial.print(map(RedPwm, 0, RedPwmMax, 0, 100));        Serial.print(" % \tPWM: ");     Serial.print(RedPwm);       Serial.print(" \tG PWM: ");  Serial.print(gamma[RedPwm]);
+            Serial.print("\t\tGreen: ");    Serial.print(map(GreenPwm, 0, GreenPwmMax, 0, 100));    Serial.print(" % \tPWM: ");     Serial.print(GreenPwm);     Serial.print(" \tG PWM: ");  Serial.print(gamma[GreenPwm]);
+            Serial.print("\t\tBlue: ");     Serial.print(map(BluePwm, 0, BluePwmMax, 0, 100));      Serial.print(" % \tPWM: ");     Serial.print(BluePwm);      Serial.print(" \tG PWM: ");  Serial.print(gamma[BluePwm]);
+            DEBUG_TimeStamp = TimeStamp;
+            Serial.println();
+            Serial.println("-------------------End serial info--------------------------");
+            Serial.println("------------------------------------------------------------\n");
+        }
+    #endif
+}
+
+void PrepareShowLight (){
+    NumRows = sizeof(LightCurve)/sizeof(LightCurve[0]);
+    //Serial.println(NumRows);
+    IndexRow = NumRows - 1;
+    for(int i = 0; i < IndexRow; i++){
+        if(TimeStamp >= LightCurve[i][0]){
+            CurrentRow = i;
+            TargetRow = CurrentRow + 1;
+            
+        }
+    }
+
+    RedCurr = map(TimeStamp, LightCurve[CurrentRow][0], LightCurve[TargetRow][0], LightCurve[CurrentRow][1], LightCurve[TargetRow][1]);
+    RedPwm = map(RedCurr, 0, 1000, 0, RedPwmMax);
+
+    GreenCurr = map(TimeStamp, LightCurve[CurrentRow][0], LightCurve[TargetRow][0], LightCurve[CurrentRow][2], LightCurve[TargetRow][2]);
+    GreenPwm = map(GreenCurr, 0, 1000, 0, GreenPwmMax);
+
+    BlueCurr = map(TimeStamp, LightCurve[CurrentRow][0], LightCurve[TargetRow][0], LightCurve[CurrentRow][3], LightCurve[TargetRow][3]);
+    BluePwm = map(BlueCurr, 0, 1000, 0, BluePwmMax);
+
+
+    if((RedPrev != RedCurr) || (GreenPrev != GreenCurr) || (BluePrev != BlueCurr)){
+        
+        ShowLight();
+        Serial.print("\n********** Color Changed **********");
+        Serial.print("\nRed   from: ");     Serial.print(float(RedPrev)/10);       Serial.print(" % \tto: ");   Serial.print(float(RedCurr)/10);      Serial.print(" % \tPWM: ");  Serial.print(RedPwm);    Serial.print(" \tGammma PWM: ");  Serial.print(gamma[RedPwm]);    
+        Serial.print("\nGreen from: ");     Serial.print(float(GreenPrev)/10);     Serial.print(" % \tto: ");   Serial.print(float(GreenCurr)/10);    Serial.print(" % \tPWM: ");  Serial.print(GreenPwm);  Serial.print(" \tGammma PWM: ");  Serial.print(gamma[GreenPwm]);
+        Serial.print("\nBlue  from: ");     Serial.print(float(BluePrev)/10);      Serial.print(" % \tto: ");   Serial.print(float(BlueCurr)/10);     Serial.print(" % \tPWM: ");  Serial.print(BluePwm);   Serial.print(" \tGammma PWM: ");  Serial.print(gamma[BluePwm]);
+        Serial.print("\n********** Color Changed **********");
+        RedPrev = RedCurr;
+        GreenPrev = GreenCurr;
+        BluePrev = BlueCurr;
+    }
+}
+
+void ShowLight(){
+    for (int i = 0; i < RGBLightNum; i++) {
+        if(USE_GAMMA_RGB){
+            RBGLights[i] = CRGB(gamma[RedPwm], gamma[GreenPwm], gamma[BluePwm]);
+        }
+        else{
+            RBGLights[i] = CRGB(RedPwm, GreenPwm, BluePwm);
+        }
+    }
+    FastLED.show();
+
+    Serial.print("\nWrite color\n");
+
+}
 
 void SetRTC(){
     if (SET_RTC){
@@ -161,62 +285,12 @@ void I2CScanner(){
         Serial.println("All device read!\n");
 }
 
-void GetTime(){
-    DateTime = rtc.getDateTime();
-    int NTimeY = DateTime.year;
-    byte NTimeMo = DateTime.month;
-    byte NTimeDay = DateTime.day;
-    byte NTimeH = DateTime.hour;
-    byte NTimeM = DateTime.minute;
-    byte NTimeS = DateTime.second;
-    if (((NTimeMo > 0) && (NTimeMo < 13)) && ((NTimeH >= 0) && (NTimeH < 24)) && ((NTimeM >= 0) && (NTimeM < 60))){
-        TimeY = NTimeY;
-        TimeMo = NTimeMo;
-        TimeDay = NTimeDay;
-        TimeH = NTimeH;
-        TimeM = NTimeM;
-        TimeS = NTimeS;
-        TimeStamp = (long(TimeH) * 3600) + (long(TimeM) * 60) + long(TimeS);
-        #ifdef DEBUG
-            Serial.println("Correct time read");
-        #endif
-    }
-    else{
-        #ifdef DEBUG
-            Serial.println("err time read");
-        #endif
-    }
-}
-
-
-void SerialInfo(){
-    #ifdef DEBUG
-        if (DEBUG_TimeStamp != TimeStamp){
-            Serial.println();
-            Serial.println("------------------------------------------------------------");
-            Serial.println("-------------------Start serial info------------------------");
-            Serial.print("Actual date and time " + String(TimeDay) + '/' + String(TimeMo) + '/' + String(TimeY) + ' ' + String(TimeH) + ":" + String(TimeM) + ":" + String(TimeS));
-            Serial.print("\nTime Stamp (sec): " + String(TimeStamp));
-            /*
-            Serial.print("\nindex current row: ");    Serial.print(CurrentRow);     Serial.print("\tindex target row: ");    Serial.print(TargetRow);
-            Serial.print("\nRed: ");        Serial.print(map(RedPwm, 0, RedPwmMax, 0, 100));        Serial.print(" % \tPWM: ");     Serial.print(RedPwm);       Serial.print(" \tG PWM: ");  Serial.print(gamma[RedPwm]);
-            Serial.print("\t\tGreen: ");    Serial.print(map(GreenPwm, 0, GreenPwmMax, 0, 100));    Serial.print(" % \tPWM: ");     Serial.print(GreenPwm);     Serial.print(" \tG PWM: ");  Serial.print(gamma[GreenPwm]);
-            Serial.print("\t\tBlue: ");     Serial.print(map(BluePwm, 0, BluePwmMax, 0, 100));      Serial.print(" % \tPWM: ");     Serial.print(BluePwm);      Serial.print(" \tG PWM: ");  Serial.print(gamma[BluePwm]);
-            */
-            DEBUG_TimeStamp = TimeStamp;
-            Serial.println();
-            Serial.println("-------------------End serial info--------------------------");
-            Serial.println("------------------------------------------------------------\n");
-        }
-    #endif
-}
-
 void TestRGB(){
     if(TEST_RGB){
         Serial.println("testig rgb");
         Serial.println("r");
         for (int i = 0; i < RGBLightNum; i++) {
-            RBGLights[i] = CRGB(25, 0, 0);
+            RBGLights[i] = CRGB(testPWM, 0, 0);
             FastLED.show();
             wdt_reset();
             delay(200);
@@ -227,7 +301,7 @@ void TestRGB(){
         FastLED.show();
         Serial.println("g");
         for (int i = 0; i < RGBLightNum; i++) {
-            RBGLights[i] = CRGB(0, 25, 0);
+            RBGLights[i] = CRGB(0, testPWM, 0);
             FastLED.show();
             wdt_reset();
             delay(200);
@@ -238,7 +312,7 @@ void TestRGB(){
         FastLED.show();
         Serial.println("b");
         for (int i = 0; i < RGBLightNum; i++) {
-            RBGLights[i] = CRGB(0, 0, 25);
+            RBGLights[i] = CRGB(0, 0, testPWM);
             FastLED.show();
             wdt_reset();
             delay(200);
